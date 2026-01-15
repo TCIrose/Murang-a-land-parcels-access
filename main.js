@@ -1,3 +1,4 @@
+//importing map/basemap
 let map = L.map('map', {
     center: [-0.92, 37.11],
     zoom: 14,
@@ -69,7 +70,7 @@ function handleParcelSelection(layer) {
     // Popup
     activePopup = L.popup()
         .setLatLng(layer.getBounds().getCenter())
-        .setContent(`<strong>Parcel:</strong> ${parcelNumber}<br><strong>Acreage:</strong> ${props.acreage}`)
+        .setContent(`<strong>Parcel:</strong> Murang'a Block 1/${parcelNumber}<br><strong>Acreage:</strong> ${props.acreage}`)
         .openOn(map);
 
     map.fitBounds(layer.getBounds(), { maxZoom: 18 });
@@ -133,42 +134,67 @@ function updateRoute(userLatLng, parcelLayer) {
         show: false
     }).addTo(map);
 
-    routingControl.on('routesfound', e => {
-        const route = e.routes[0];
-        const summary = route.summary;
-		
-		// Zoom the map to fit the route
-		const routeBounds = L.latLngBounds(route.coordinates);
-		map.fitBounds(routeBounds, { padding: [50, 50] });
-		
-        // Remove previous route popup if exists
-		if (activeRoutePopup) {
-			map.closePopup(activeRoutePopup);
-		}
-		
-		// Calculate midpoint of the route
-		const midpointIndex = Math.floor(route.coordinates.length / 2);
-		const midpoint = route.coordinates[midpointIndex];
-		
-		// Remove previous route popup if exists
-		if (activeRoutePopup) {
-			map.closePopup(activeRoutePopup);
-		}
+	routingControl.on('routesfound', e => {
+    const route = e.routes[0];
+    const summary = route.summary;
 
-		activeRoutePopup = L.popup({
-			closeButton: true,
-			autoClose: false,
-			closeOnClick: false,
-			className: "route-popup"
-		})
-		.setLatLng(midpoint)
-		.setContent(`
-			<strong>Distance:</strong> ${(summary.totalDistance/1000).toFixed(2)} km<br>
-			<strong>Estimated time:</strong> ${Math.round(summary.totalTime/60)} mins
-		`)
-		.openOn(map);
+    // Zoom to route
+    const routeBounds = L.latLngBounds(route.coordinates);
+    map.fitBounds(routeBounds, { padding: [50, 50] });
+
+    // Check parcel accessibility
+    const blocked = routeCutsThroughOtherParcels(
+        route.coordinates,
+        selectedParcelLayer
+    );
+
+    // Midpoint popup
+    const midpointIndex = Math.floor(route.coordinates.length / 2);
+    const midpoint = route.coordinates[midpointIndex];
+
+    if (activeRoutePopup) map.closePopup(activeRoutePopup);
+
+    activeRoutePopup = L.popup({
+        closeButton: true,
+        autoClose: false,
+        closeOnClick: false,
+        className: "route-popup"
+    })
+    .setLatLng(midpoint)
+    .setContent(`
+        <strong>Distance:</strong> ${(summary.totalDistance/1000).toFixed(2)} km<br>
+        <strong>Estimated time:</strong> ${Math.round(summary.totalTime/60)} mins
+        ${blocked ? `<br><br><span style="color:red;">
+        ⚠ Route crosses other parcels – access may be restricted
+        </span>` : ""}
+    `)
+    .openOn(map);
 	});
 }
+
+// ---------------- identify parcels that lack direct access ----------------
+function routeCutsThroughOtherParcels(routeCoords, selectedLayer) {
+    // Convert route to Turf LineString
+    const routeLine = turf.lineString(
+        routeCoords.map(c => [c.lng, c.lat])
+    );
+
+    let intersects = false;
+
+    parcelsLayer.eachLayer(layer => {
+        // Skip the selected parcel itself
+        if (layer === selectedLayer) return;
+
+        const parcelGeoJSON = layer.toGeoJSON();
+
+        if (turf.booleanIntersects(routeLine, parcelGeoJSON)) {
+            intersects = true;
+        }
+    });
+
+    return intersects;
+}
+
 
 // ---------------- Search ----------------
 document.getElementById("parcel-search-btn").addEventListener("click", () => {
